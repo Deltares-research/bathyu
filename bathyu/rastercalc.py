@@ -1,5 +1,6 @@
 import dask.array as da
 import numpy as np
+from dask import delayed
 
 
 def slope(array: np.ndarray) -> np.ndarray:

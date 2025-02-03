@@ -1,10 +1,13 @@
+from functools import singledispatch
 from pathlib import Path, WindowsPath
 
 import xarray as xr
+from dask.diagnostics import ProgressBar
 
 from bathyu.main import AlignedRasters, TiledRasters
 
 
+@singledispatch
 def to_nc(
     data: xr.DataArray | AlignedRasters | TiledRasters,
     file: str | WindowsPath,
@@ -32,30 +35,28 @@ def to_nc(
     TypeError
         If the input data is not an xarray.DataArray, AlignedRasters, or TiledRasters.
     """
-    if isinstance(data, (AlignedRasters, TiledRasters)):
-        da_to_save = data.data
-    elif isinstance(data, xr.DataArray):
-        da_to_save = data
-    else:
-        raise(TypeError("data must be an xarray.DataArray, AlignedRasters, or TiledRasters"))
-
     if compress:
-        da_to_save.to_netcdf(
+        delayed = data.to_netcdf(
             file,
             engine="h5netcdf",
             encoding={
-                da_to_save.name
-                or "__xarray_dataarray_variable__": {
+                data.name or "__xarray_dataarray_variable__": {
                     "zlib": True,
                     "complevel": compress_level,
                 }
             },
+            compute=False,
         )
 
     else:
-        da_to_save.to_netcdf(file, engine="h5netcdf")
+        delayed = data.to_netcdf(file, engine="h5netcdf", compute=False)
+
+    with ProgressBar():
+        print("Exporting to NetCDF...")
+        delayed.compute()
 
 
+@singledispatch
 def to_geotiff(
     data: xr.DataArray | TiledRasters, file: str | WindowsPath, compress=False
 ) -> None:
@@ -75,14 +76,32 @@ def to_geotiff(
     TypeError
         If the input data is not an xarray.DataArray or TiledRasters
     """
-    if isinstance(data, TiledRasters):
-        da_to_save = data.data
-    elif isinstance(data, xr.DataArray):
-        da_to_save = data
-    else:
-        raise(TypeError("data must be an xarray.DataArray or TiledRasters"))
-
     if compress:
-        da_to_save.rio.to_raster(file, driver="GTiff", compress="LZW")
+        data.rio.to_raster(file, driver="GTiff", compress="LZW")
     else:
-        da_to_save.rio.to_raster(file, driver="GTiff")
+        data.rio.to_raster(file, driver="GTiff")
+
+
+@to_nc.register
+def _(
+    data: AlignedRasters | TiledRasters,
+    file: str | WindowsPath,
+    compress=False,
+    compress_level=9,
+) -> None:
+    """
+    Implementation of to_nc for AlignedRasters and TiledRasters objects.
+    """
+    to_nc(data.data, file, compress=compress, compress_level=compress_level)
+
+
+@to_geotiff.register
+def _(
+    data: TiledRasters,
+    file: str | WindowsPath,
+    compress=False,
+) -> None:
+    """
+    Implementation of to_geotiff for TiledRasters objects.
+    """
+    to_geotiff(data.data, file, compress=compress)

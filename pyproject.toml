@@ -81,6 +81,8 @@ pydata-sphinx-theme = "*"
 sphinx-design = "*"
 myst-nb = "*"
 h5netcdf = "*"
+tqdm = "*"
+bottleneck = "*"
 
 [tool.pixi.pypi-dependencies]
 bathyu = { path = ".", editable = true }

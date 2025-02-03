@@ -1,3 +1,4 @@
+import logging
 import re
 from pathlib import Path, WindowsPath
 from typing import Iterable
@@ -8,8 +9,12 @@ import numpy as np
 import rioxarray as rio
 import xarray as xr
 from rioxarray.merge import merge_arrays
+from tqdm import tqdm
 
 from bathyu import rastercalc, utils
+
+reindex_logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 class AlignedRasters:
@@ -60,8 +65,8 @@ class AlignedRasters:
         bbox: list[int | float] = [],
         desired_crs: str = "epsg:28992",
         dtype: np.dtype = np.float32,
-        chunk_params: dict = {"time": 1, "x": 2000, "y": 2000},
-        force_nodata: bool = False,
+        chunk_params: dict = {"time": 6, "x": 2000, "y": 2000},
+        force_nodata: bool = True,
         scale_factors: float | list[float] = None,
     ):
         """
@@ -93,9 +98,10 @@ class AlignedRasters:
             Datatype to use for raster values, by default numpy.float32.
         chunk_params : dict
             Dictionary of chunk parameters. Must be of the form:
-            {'time': int, 'x': int, 'y': int}.
+            {'time': int, 'x': int, 'y': int}. The default gives ~100 MB chunks for
+            float32 values. By default {'time': 6, 'x': 2000, 'y': 2000}.
         force_nodata : bool, optional
-            Whether to force the nodata value to np.nan. By default False.
+            Whether to force the nodata value to np.nan. By default True.
         scale_factors : None | list[float], optional
             Scale factor to apply to each raster. By default None. Must have the same
             length as the amount of input rasters.
@@ -127,6 +133,10 @@ class AlignedRasters:
             ymin = bbox[2]
             ymax = bbox[3]
             rasters = [r.sel(x=slice(xmin, xmax), y=slice(ymax, ymin)) for r in rasters]
+            rasters = [r for r in rasters if r.shape[0] > 0 and r.shape[1] > 0]
+            times = [
+                t for t, r in zip(times, rasters) if r.shape[0] > 0 and r.shape[1] > 0
+            ]
         else:
             raise TypeError(
                 "Invalid bounds. Check the validity of your bounds and bbox arguments!"
@@ -153,28 +163,32 @@ class AlignedRasters:
         )
         result_da = xr.DataArray(
             data=da.empty(
-                [len(times), len(y_coordinates), len(x_coordinates)],
+                [len(rasters), len(y_coordinates), len(x_coordinates)],
                 chunks=(chunk_params["time"], chunk_params["y"], chunk_params["x"]),
                 dtype=dtype,
             ),
             coords={"time": times, "y": y_coordinates, "x": x_coordinates},
         )
 
-        # Reproject input rasters to target grid
-        for i, (raster, time) in enumerate(zip(rasters, times)):
+        # Reindex input rasters to target grid
+        reindex_logger.info(
+            f" Reindexing rasters to new grid\nTarget grid: {target_single_grid.shape}\n>>> {utils.log_memory_usage()} (Pre-reindex)"
+        )
+        for i, (raster, time) in tqdm(enumerate(zip(rasters, times))):
             if force_nodata:
                 raster = raster.where(raster != raster.attrs["_FillValue"], np.nan)
                 raster.rio.update_attrs({"_FillValue": np.nan})
             if scale_factors:
                 raster = raster * scale_factors[i]
-            print("Reprojecting to new grid")
             result_da.loc[dict(time=time)] = target_single_grid.map_blocks(
                 rastercalc.reindex_chunks,
                 kwargs={"raster": raster, "resolution": resolution},
                 template=target_single_grid,
             )
-        result_da = result_da.where(result_da != np.nan)
-        result_da.attrs["_FillValue"] = np.nan
+        reindex_logger.info(
+            f" Reindexing done\n>>> {utils.log_memory_usage()} (Post-reindex)"
+        )
+
         result_da.rio.write_crs(desired_crs)
         result_da = utils.set_da_attributes(result_da)
 

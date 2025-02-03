@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import psutil
 
 
 def find_date_in_filename_from_format(filename, time_format):
@@ -188,3 +189,17 @@ def set_da_attributes(da, **kwargs):
     da["y"].attrs["axis"] = "Y"
     da = da.assign_attrs(kwargs)
     return da
+
+
+def log_memory_usage():
+    """
+    Logs the memory usage of the current process.
+
+    Returns
+    -------
+    str
+        A string representing the memory usage in megabytes (MB).
+    """
+    process = psutil.Process()
+    mem_info = process.memory_info()
+    return f"Memory usage: {mem_info.rss / (1024**2):.2f} MB"
