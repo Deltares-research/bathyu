@@ -388,10 +388,12 @@ class TiledRasters:  # pragma: no cover
         The combined raster data.
     """
 
-    def __init__(self, data: xr.DataArray):
+    def __init__(self, data: xr.DataArray, included_surveys: list[str] = None):
         self.data = data
         self.data.where(self.data != self.data.rio.nodata, np.nan)
-        self.data["_FillValue"] = np.nan
+        self.data.attrs["_FillValue"] = np.nan
+
+        self.included_surveys = included_surveys
 
     @classmethod
     def from_tiled_raster_files(cls, files: Iterable[str | WindowsPath]):
@@ -399,8 +401,9 @@ class TiledRasters:  # pragma: no cover
             rio.open_rasterio(f).squeeze().drop_vars(["band", "spatial_ref"])
             for f in files
         ]
+        included_surveys = [f.stem for f in files]
         data_combined = xr.combine_by_coords(data)
-        return cls(data_combined)
+        return cls(data_combined, included_surveys)
 
     @classmethod
     def from_nlho_grid_files(
@@ -426,6 +429,7 @@ class TiledRasters:  # pragma: no cover
 
         # Iterate over tiles and create mosaic for each tile
         mosaics = []
+        included_surveys = []
         for tile in tiles:
             print(f"Processing tile: {tile}")
             tile_files = [
@@ -441,6 +445,7 @@ class TiledRasters:  # pragma: no cover
                     for f in tile_files
                 ]
             )
+            included_surveys += [f.stem.split("_")[2] for f in tile_files]
             sorted_indices = np.argsort(tile_survey_numbers)
             sorted_tile_files = [tile_files[i] for i in sorted_indices]
 
@@ -458,5 +463,6 @@ class TiledRasters:  # pragma: no cover
         # Combine all mosaics into one DataArray
         print("Combining tile mosaics")
         data_combined = xr.combine_by_coords(mosaics)
+        included_surveys = list(set(included_surveys))
 
-        return cls(data_combined)
+        return cls(data_combined, included_surveys)
