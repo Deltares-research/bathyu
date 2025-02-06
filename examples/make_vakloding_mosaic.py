@@ -14,7 +14,7 @@ files = sorted(
     ]
 )
 
-# Organize them into an instance of AlignedRasters
+# Organize them into an instance of AlignedRasters, featuring a 10 x 10 km bounding box.
 rasters = AlignedRasters.from_files(
     files,
     "%Y",
@@ -35,7 +35,7 @@ to_geotiff(
     compress=True,
 )
 to_geotiff(
-    most_recent_mosaic,
+    most_recent_idx,
     r"p:\kpp-benokust-gis-data\bathymetrie\Vaklodingen\Mosaicen\_Totaal_Mosaic\voorbeeld_most_recent_index.tiff",
     compress=True,
 )

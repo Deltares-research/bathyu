@@ -35,6 +35,19 @@ def to_nc(
     TypeError
         If the input data is not an xarray.DataArray, AlignedRasters, or TiledRasters.
     """
+    raise TypeError(f"Unsupported data type: {type(data)}")
+
+
+@to_nc.register
+def _(
+    data: xr.DataArray,
+    file: str | WindowsPath,
+    compress=False,
+    compress_level=9,
+) -> None:
+    """
+    Implementation of to_nc for DataArrays.
+    """
     if compress:
         delayed = data.to_netcdf(
             file,
@@ -54,6 +67,19 @@ def to_nc(
     with ProgressBar():
         print("Exporting to NetCDF...")
         delayed.compute()
+
+
+@to_nc.register
+def _(
+    data: AlignedRasters | TiledRasters,
+    file: str | WindowsPath,
+    compress=False,
+    compress_level=9,
+) -> None:
+    """
+    Implementation of to_nc for AlignedRasters and TiledRasters objects.
+    """
+    to_nc(data.data, file, compress=compress, compress_level=compress_level)
 
 
 @singledispatch
@@ -76,23 +102,22 @@ def to_geotiff(
     TypeError
         If the input data is not an xarray.DataArray or TiledRasters
     """
+    raise TypeError(f"Unsupported data type: {type(data)}")
+
+
+@to_geotiff.register
+def _(
+    data: xr.DataArray,
+    file: str | WindowsPath,
+    compress=False,
+) -> None:
+    """
+    Implementation of to_geotiff for xr.DataArray objects.
+    """
     if compress:
         data.rio.to_raster(file, driver="GTiff", compress="LZW")
     else:
         data.rio.to_raster(file, driver="GTiff")
-
-
-@to_nc.register
-def _(
-    data: AlignedRasters | TiledRasters,
-    file: str | WindowsPath,
-    compress=False,
-    compress_level=9,
-) -> None:
-    """
-    Implementation of to_nc for AlignedRasters and TiledRasters objects.
-    """
-    to_nc(data.data, file, compress=compress, compress_level=compress_level)
 
 
 @to_geotiff.register
