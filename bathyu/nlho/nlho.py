@@ -10,6 +10,10 @@ import pandas as pd
 import pyproj
 import rioxarray as rio
 import xarray as xr
+from tqdm import tqdm
+
+from bathyu.io.export import to_nc
+from bathyu.utils import set_da_attributes
 
 
 def get_current_datetime(format: str = "%Y-%m-%dT%H:%MZ") -> str:
@@ -97,7 +101,9 @@ def parse_survey_metadata(metadata_excel: Path | str) -> pd.DataFrame:
         [pd.read_excel(metadata_excel, sheet_name=sheet) for sheet in data_sheets]
     )
     metadata.reset_index(drop=True, inplace=True)
-    metadata["survey_index"] = metadata["Filename"].apply(lambda x: x.split(".")[0])
+    metadata["survey_index"] = metadata["Filename"].apply(
+        lambda x: x.split(".")[0].strip()
+    )
     metadata.set_index("survey_index", inplace=True)
 
     # Improve reference to positional reference systems (we assume UTM 31N here)
@@ -147,10 +153,69 @@ def get_nlho_tiles_and_files(
     return tiles, files
 
 
+def validate_nlho_metadata(metadata: pd.DataFrame, files) -> pd.DataFrame:
+    """
+    Validate and update the metadata DataFrame based on the survey names found in the
+    grid filenames that are not present in the metadata. This is typically because the
+    survey name in the filename does not exactly match the survey name in the metadata.
+
+    Parameters
+    ----------
+    metadata : pd.DataFrame
+        A DataFrame containing metadata with survey names as the index.
+    files : list
+        A list of ascii files containing the NLHO grid data.
+
+    Returns
+    -------
+    pd.DataFrame
+        The updated metadata DataFrame with missing survey names added if found.
+
+    Notes
+    -----
+    - The function extracts survey names from the filenames and compares them with the survey names in the metadata index.
+    - If there are survey names in the filenames that are not present in the metadata, the function attempts to find and update the missing metadata.
+    - The survey names in the filenames are expected to be in the format where the survey name is the third element when split by underscores.
+    """
+
+    unique_surveys_from_files = set([f.name.split("_")[2] for f in files])
+    unique_surveys_from_metadata = set(metadata.index)
+    missing_surveys_in_metadata = (
+        unique_surveys_from_files - unique_surveys_from_metadata
+    )
+    if missing_surveys_in_metadata:
+        print(
+            f"Survey names that are mentioned in filenames, but absent in metadata:\n\n{missing_surveys_in_metadata}\n\n   >> Trying to find the missing metadata from the metadata file."
+        )
+        missing_survey_numbers = [
+            re.search(r"\d+", survey).group() for survey in missing_surveys_in_metadata
+        ]
+        survey_number_to_id = {
+            re.search(r"\d+", survey).group(): survey for survey in metadata.index
+        }
+        new_index_mapping = {
+            survey_number_to_id[missing_survey_number]: missing_survey_in_metadata
+            for missing_survey_number, missing_survey_in_metadata in zip(
+                missing_survey_numbers, missing_surveys_in_metadata
+            )
+        }
+        print(
+            f"\n\nFound the following matches:\n\n{new_index_mapping}\n\nUpdating metadata index based on the found matches."
+        )
+
+        # Add the new metadata to the existing metadata, not replacing the existing
+        # metadata, but through adding new rows as some surveys may be referenced
+        # by multiple names (this dataset is a bit of a mess)
+        extra_rows = metadata.loc[new_index_mapping.keys()]
+        extra_rows.rename(index=new_index_mapping, inplace=True)
+        metadata = pd.concat([metadata, extra_rows])
+    return metadata
+
+
 def tile_surveys_to_netcdf(
     tile: tuple[int, int],
-    metadata: pd.DataFrame,
     files: list[Path],
+    metadata: pd.DataFrame,
     output_folder: Path | str,
 ) -> None:
     """
@@ -172,19 +237,35 @@ def tile_surveys_to_netcdf(
         & (int(re.search(r"y(\d+)", f.stem).group(1)) == tile[1])
     ]
 
-    survey_names = [f.split("_")[2] for f in tile_files]
+    survey_names = [f.name.split("_")[2] for f in tile_files]
+    survey_times = [metadata.loc[survey, "Survey End Date"] for survey in survey_names]
+
+    # Sort tile_files and survey_names with survey_times
+    tile_files = [file for _, file in sorted(zip(survey_times, tile_files))]
+    survey_times.sort()
+
     tile_data = [
         rio.open_rasterio(file).squeeze().drop_vars(["band", "spatial_ref"])
         for file in tile_files
     ]
+    concatenated_surveys = xr.concat(tile_data, dim="time")
+    concatenated_surveys = concatenated_surveys.assign_coords(
+        time=("time", survey_times)
+    )
+    concatenated_surveys = concatenated_surveys.assign_coords(crs=32631)
 
-    # logic goes here
-    # data = rio.open_rasterio(file).squeeze().drop_vars(["band", "spatial_ref"])
-    # data.rio.write_crs(32631)
-    # data.rio.write_nodata(data.rio.nodata, encoded=False, inplace=True)
-    # data = data.where(data != data.rio.nodata, np.nan)
-    # data.attrs["_FillValue"] = np.nan
-    # data.to_netcdf(output_folder / f"{file.stem}.nc", engine="h5netcdf")
+    set_da_attributes(
+        concatenated_surveys,
+        **NLHOAttributes.from_dataarray(concatenated_surveys).__dict__,
+    )
+
+    # TO CONTINUE...
+
+    # Export to NetCDF
+    output_folder = Path(output_folder)
+    output_folder.mkdir(parents=True, exist_ok=True)
+    output_file = output_folder / f"x{tile[0]}y{tile[1]}.nc"
+    to_nc(concatenated_surveys, output_file, compress=True)
 
 
 @dataclass
@@ -257,19 +338,35 @@ class NLHOAttributes:
             super().__setattr__("date_modified", get_current_datetime())
         super().__setattr__(name, value)
 
+    @classmethod
+    def from_dataarray(cls, dataarray):
+        """
+        Create an NLHOAttributes object from an xarray.DataArray.
+        """
+        attrs = cls()
+        attrs.geospatial_lon_min = float(dataarray.x.min())
+        attrs.geospatial_lon_max = float(dataarray.x.max())
+        attrs.geospatial_lat_min = float(dataarray.y.min())
+        attrs.geospatial_lat_max = float(dataarray.y.max())
+        attrs.geospatial_vertical_min = float(dataarray.values.min())
+        attrs.geospatial_vertical_max = float(dataarray.values.max())
+        attrs.timecoverage = (
+            f"{dataarray.time.min().values} - {dataarray.time.max().values}"
+        )
+        return attrs
+
 
 if __name__ == "__main__":
-    # example = nlho_from_opendap()
+    example = nlho_from_opendap()
     tiles, files = get_nlho_tiles_and_files(r"p:\tgg-mariene-data\__UPDATES\GRIDS")
-    for tile in tiles:
-        tile_surveys_to_netcdf(
-            tile,
-            files,
-            r"",
-        )
-
     metadata = parse_survey_metadata(
         r"p:\tgg-mariene-data\__UPDATES\SVN_CHECKOUTS\metadata_SVN\METADATA_ALL.xlsx"
     )
-    attrs_init = NLHOAttributes()
-    attrs_init.processing_level = "intermediate"
+    metadata = validate_nlho_metadata(metadata, files)
+    for tile in tqdm(tiles):
+        tile_surveys_to_netcdf(
+            tile,
+            files,
+            metadata,
+            r"p:\tgg-mariene-data\__UPDATES\NetCDF",
+        )
