@@ -83,6 +83,8 @@ myst-nb = "*"
 h5netcdf = "*"
 tqdm = "*"
 bottleneck = "*"
+pydap = "*"
+openpyxl = "*"
 
 [tool.pixi.pypi-dependencies]
 bathyu = { path = ".", editable = true }
