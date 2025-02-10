@@ -9,7 +9,7 @@ from bathyu.main import AlignedRasters, TiledRasters
 
 @singledispatch
 def to_nc(
-    data: xr.DataArray | AlignedRasters | TiledRasters,
+    data: xr.DataArray | xr.Dataset | AlignedRasters | TiledRasters,
     file: str | WindowsPath,
     compress=False,
     compress_level=9,
@@ -61,6 +61,39 @@ def _(
             compute=False,
         )
 
+    else:
+        delayed = data.to_netcdf(file, engine="h5netcdf", compute=False)
+
+    with ProgressBar():
+        print("Exporting to NetCDF...")
+        delayed.compute()
+
+
+@to_nc.register
+def _(
+    data: xr.Dataset,
+    file: str | WindowsPath,
+    compress=False,
+    compress_level=9,
+) -> None:
+    """
+    Implementation of to_nc for Datasets. Only compresses data_vars with dimensions
+    (time, y, x).
+    """
+    # Define compression parameters for data_vars with dimensions (time, y, x)
+    data_vars_compression_parameters = {
+        var: {"zlib": True, "complevel": compress_level}
+        for var in data.data_vars
+        if set(data[var].dims) == {"time", "y", "x"}
+    }
+
+    if compress:
+        delayed = data.to_netcdf(
+            file,
+            engine="h5netcdf",
+            encoding=data_vars_compression_parameters,
+            compute=False,
+        )
     else:
         delayed = data.to_netcdf(file, engine="h5netcdf", compute=False)
 

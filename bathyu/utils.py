@@ -1,10 +1,68 @@
+import getpass
 import pathlib
+import platform
 import re
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import psutil
+
+
+def get_current_datetime(format: str = "%Y-%m-%dT%H:%MZ") -> str:
+    """
+    Get the current date and time formatted as a string.
+
+    Parameters
+    ----------
+    format : str, optional
+        The format in which to return the date and time. Default is "%Y-%m-%dT%H:%MZ".
+
+    Returns
+    -------
+    str
+        The current date and time formatted as a string.
+    """
+    return datetime.now().strftime(format)
+
+
+def get_current_username() -> str:
+    """
+    Get the current system username.
+
+    Returns
+    -------
+    str
+        The username of the current user logged into the system.
+    """
+    return getpass.getuser()
+
+
+def get_computer_name() -> str:
+    """
+    Get the name of the computer.
+
+    Returns
+    -------
+    str
+        The name of the computer as a string.
+    """
+    return platform.node()
+
+
+def get_current_package_name() -> str:
+    """
+    Get the current package name from the file path.
+
+    This function constructs the package name by joining the last four components
+    of the file path, replacing backslashes with forward slashes.
+
+    Returns
+    -------
+    str
+        The package name derived from the file path.
+    """
+    return "/".join(str(Path(__file__)).split("\\")[-2:])
 
 
 def find_date_in_filename_from_format(filename, time_format):
@@ -184,7 +242,6 @@ def set_da_attributes(da, **kwargs):
     - "y" axis attribute: "Y"
     """
     da.attrs["_FillValue"] = np.nan
-    da.attrs["nodatavals"] = np.nan
     da["x"].attrs["axis"] = "X"
     da["y"].attrs["axis"] = "Y"
     da = da.assign_attrs(kwargs)
@@ -203,5 +260,3 @@ def log_memory_usage():
     process = psutil.Process()
     mem_info = process.memory_info()
     return f"Memory usage: {mem_info.rss / (1024**2):.2f} MB"
-
-

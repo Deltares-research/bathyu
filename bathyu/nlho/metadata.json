@@ -1,0 +1,54 @@
+{
+    "sid": {
+        "standard_name": "sid",
+        "long_name": "Survey ID",
+        "definition": "Unique ID number of survey, given by the Hydrographic Office"
+    },
+    "surveycode": {
+        "standard_name": "surveycode",
+        "long_name": "Survey Code",
+        "definition": "Code of survey starting with HY, given by the Hydrographic Office"
+    },
+    "areaname": {
+        "standard_name": "areaname",
+        "long_name": "Area Name",
+        "definition": "Topographic name of area covered by survey"
+    },
+    "begindate": {
+        "standard_name": "begindate",
+        "long_name": "Survey Begin Date",
+        "definition": "Begin date of survey",
+        "units": "YYYY-MM-DD"
+    },
+    "enddate": {
+        "standard_name": "enddate",
+        "long_name": "Survey End Date",
+        "definition": "End date of survey",
+        "units": "YYYY-MM-DD"
+    },
+    "organisation": {
+        "standard_name": "organisation",
+        "long_name": "Organisation",
+        "definition": "Name of the organisation that conducted the survey"
+    },
+    "ship": {
+        "standard_name": "ship",
+        "long_name": "Ship",
+        "definition": "Name of the ship with which the survey was conducted"
+    },
+    "positionsystem": {
+        "standard_name": "positionsystem",
+        "long_name": "Primary Position System",
+        "definition": "Technique used to determine geographic position during survey"
+    },
+    "echosounder": {
+        "standard_name": "echosounder",
+        "long_name": "Echo Sounder Type",
+        "definition": "Name of the echo sounder equipment used during survey"
+    },
+    "seafloormapping": {
+        "standard_name": "seafloormapping",
+        "long_name": "Seafloor Mapping System",
+        "definition": "Name of the seafloor mapping system used during survey"
+    }
+}

@@ -1,75 +1,24 @@
-import getpass
-import platform
+import json
 import re
-from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pyproj
 import rioxarray as rio
 import xarray as xr
-from tqdm import tqdm
+from pyproj import CRS
 
 from bathyu.io.export import to_nc
+from bathyu.nlho.attributes import (
+    MetaAttrs,
+    NlhoGlobalAttributes,
+    TimeAttrs,
+    XAttrs,
+    YAttrs,
+    ZAttrs,
+)
+from bathyu.rastercalc import cell_coverage, fill_with_index
 from bathyu.utils import set_da_attributes
-
-
-def get_current_datetime(format: str = "%Y-%m-%dT%H:%MZ") -> str:
-    """
-    Get the current date and time formatted as a string.
-
-    Parameters
-    ----------
-    format : str, optional
-        The format in which to return the date and time. Default is "%Y-%m-%dT%H:%MZ".
-
-    Returns
-    -------
-    str
-        The current date and time formatted as a string.
-    """
-    return datetime.now().strftime(format)
-
-
-def get_current_username() -> str:
-    """
-    Get the current system username.
-
-    Returns
-    -------
-    str
-        The username of the current user logged into the system.
-    """
-    return getpass.getuser()
-
-
-def get_computer_name() -> str:
-    """
-    Get the name of the computer.
-
-    Returns
-    -------
-    str
-        The name of the computer as a string.
-    """
-    return platform.node()
-
-
-def get_current_package_name() -> str:
-    """
-    Get the current package name from the file path.
-
-    This function constructs the package name by joining the last four components
-    of the file path, replacing backslashes with forward slashes.
-
-    Returns
-    -------
-    str
-        The package name derived from the file path.
-    """
-    return "/".join(str(Path(__file__)).split("\\")[-4:])
 
 
 def parse_survey_metadata(metadata_excel: Path | str) -> pd.DataFrame:
@@ -106,17 +55,14 @@ def parse_survey_metadata(metadata_excel: Path | str) -> pd.DataFrame:
     )
     metadata.set_index("survey_index", inplace=True)
 
-    # Improve reference to positional reference systems (we assume UTM 31N here)
-    # metadata["Horizontal Datum"] = metadata["Horizontal Datum"].apply(
-    #     lambda x: pyproj.CRS(x + " / UTM zone 31N")
-    # )
     return metadata
 
 
 def nlho_from_opendap(
     url: str = r"https://opendap.deltares.nl/thredds/dodsC/opendap/hydrografie/surveys/x410000y5660000.nc",
+    **kwargs,
 ):
-    data = xr.open_dataset(url)
+    data = xr.open_dataset(url, **kwargs)
     return data
 
 
@@ -200,7 +146,7 @@ def validate_nlho_metadata(metadata: pd.DataFrame, files) -> pd.DataFrame:
             )
         }
         print(
-            f"\n\nFound the following matches:\n\n{new_index_mapping}\n\nUpdating metadata index based on the found matches."
+            f"\n\nFound the following matches:\n\n{new_index_mapping}\n\nUpdating metadata indices based on the found matches."
         )
 
         # Add the new metadata to the existing metadata, not replacing the existing
@@ -212,10 +158,65 @@ def validate_nlho_metadata(metadata: pd.DataFrame, files) -> pd.DataFrame:
     return metadata
 
 
+def extract_isource_and_coverage(
+    data: xr.Dataset, tile_files: pd.DataFrame, survey_names: list[str]
+) -> xr.DataArray:
+    """
+    Extract time-varying data variables from a data array.
+
+    Parameters
+    ----------
+    data : xr.DataArray
+        The data array containing the time dimension.
+
+    Returns
+    -------
+    xr.DataArray
+        A new data array containing only the time-varying data variables.
+
+    Notes
+    -----
+    - The function assumes that the time dimension is named 'time'.
+    - The function extracts all variables that are not coordinates or attributes.
+    """
+    coverage = cell_coverage(data.z.values, axis=0).astype(np.float32)
+    isource = fill_with_index(data.z.values).astype(np.float32)
+
+    data = data.assign(
+        **{
+            "isource": (("time", "y", "x"), isource),
+            "coverage": (("y", "x"), coverage),
+        }
+    )
+
+    isource_flags = " ".join([str(float(r + 1)) for r in range(len(survey_names))])
+    isource_flag_meanings = " ".join([f.name for f in tile_files])
+    data["isource"] = data["isource"].assign_attrs(
+        **{
+            "standard_name": "isource",
+            "long_name": "source file index",
+            "definition": "zero based index of source file. The given index in a time slice corresponds to the survey that is most recent for that location and time.",
+            "flag_values": isource_flags,
+            "flag_meanings": isource_flag_meanings,
+            "grid_mapping": "crs",
+        }
+    )
+    data["coverage"] = data["coverage"].assign_attrs(
+        **{
+            "standard_name": "coverage",
+            "long_name": "Survey coverage",
+            "definition": "Number of surveys covering each cell in the time dimension",
+            "grid_mapping": "crs",
+        }
+    )
+    return data
+
+
 def tile_surveys_to_netcdf(
     tile: tuple[int, int],
     files: list[Path],
-    metadata: pd.DataFrame,
+    metadata_data: pd.DataFrame,
+    metadata_fields: dict,
     output_folder: Path | str,
 ) -> None:
     """
@@ -238,12 +239,20 @@ def tile_surveys_to_netcdf(
     ]
 
     survey_names = [f.name.split("_")[2] for f in tile_files]
-    survey_times = [metadata.loc[survey, "Survey End Date"] for survey in survey_names]
+    survey_times = [
+        metadata_data.loc[survey, "Survey End Date"] for survey in survey_names
+    ]
 
-    # Sort tile_files and survey_names with survey_times
+    # Sort tile_files, survey_names an survey_times based on survey_times (old to new)
     tile_files = [file for _, file in sorted(zip(survey_times, tile_files))]
+    survey_names = [f.name.split("_")[2] for f in tile_files]
     survey_times.sort()
 
+    # Convert survey times to days since 1970-01-01
+    survey_times = pd.to_datetime(survey_times)
+    survey_times = (survey_times - pd.Timestamp("1970-01-01")) // pd.Timedelta("1D")
+
+    # Get raster data from tile files and concatenate
     tile_data = [
         rio.open_rasterio(file).squeeze().drop_vars(["band", "spatial_ref"])
         for file in tile_files
@@ -252,121 +261,62 @@ def tile_surveys_to_netcdf(
     concatenated_surveys = concatenated_surveys.assign_coords(
         time=("time", survey_times)
     )
-    concatenated_surveys = concatenated_surveys.assign_coords(crs=32631)
 
-    set_da_attributes(
-        concatenated_surveys,
-        **NLHOAttributes.from_dataarray(concatenated_surveys).__dict__,
+    # Replace fill values with NaN
+    concatenated_surveys = concatenated_surveys.where(
+        concatenated_surveys != concatenated_surveys.attrs["_FillValue"], np.nan
+    )
+    concatenated_surveys.rio.update_attrs({"_FillValue": np.nan}, inplace=True)
+
+    # Set attributes for data and coordinate data_vars (z, x, y and time)
+    concatenated_surveys = concatenated_surveys.to_dataset(name="z")
+    concatenated_surveys["z"] = concatenated_surveys["z"].assign_attrs(
+        ZAttrs.from_dataset(concatenated_surveys).as_dict
+    )
+    concatenated_surveys["x"] = concatenated_surveys["x"].assign_attrs(
+        XAttrs.from_dataset(concatenated_surveys).as_dict
+    )
+    concatenated_surveys["y"] = concatenated_surveys["y"].assign_attrs(
+        YAttrs.from_dataset(concatenated_surveys).as_dict
+    )
+    concatenated_surveys["time"] = concatenated_surveys["time"].assign_attrs(
+        TimeAttrs.from_dataset(concatenated_surveys).as_dict
     )
 
-    # TO CONTINUE...
+    # Add isource and coverage data variables along with their attributes
+    concatenated_surveys = extract_isource_and_coverage(
+        concatenated_surveys, tile_files, survey_names
+    )
+
+    # Set the CRS of the dataset to EPSG:32631 following CF conventions
+    concatenated_surveys["crs"] = xr.DataArray(
+        np.array(0), attrs=CRS.from_epsg(32631).to_cf()
+    )
+
+    # Set other metadata and corresponding attributes
+    for metadata in metadata_fields.values():
+        metadata_object = MetaAttrs.from_metadata_df(
+            metadata_data, survey_names, **metadata
+        )
+        concatenated_surveys = concatenated_surveys.assign(
+            **{metadata_object.standard_name: ("time", metadata_object.values)}
+        )
+        concatenated_surveys[metadata_object.standard_name] = concatenated_surveys[
+            metadata_object.standard_name
+        ].assign_attrs(metadata_object.attrs_as_dict)
+        if "timeunits" in metadata_object.attrs_as_dict.keys():
+            concatenated_surveys[metadata_object.standard_name].encoding["units"] = (
+                metadata_object.timeunits
+            )
+
+    # Set global attributes
+    concatenated_surveys = set_da_attributes(
+        concatenated_surveys,
+        **NlhoGlobalAttributes.from_dataset(concatenated_surveys).as_dict,
+    )
 
     # Export to NetCDF
     output_folder = Path(output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
     output_file = output_folder / f"x{tile[0]}y{tile[1]}.nc"
     to_nc(concatenated_surveys, output_file, compress=True)
-
-
-@dataclass
-class NLHOAttributes:
-    """
-    Dataclass for NLHO survey metadata attributes.
-    """
-
-    id: str = (
-        f"hydrografie_survey_grids_release_{get_current_datetime(format='%Y%m%d')}"
-    )
-    naming_authority: str = "deltares.nl"
-    Metadata_Conventions: str = "CF-1.6"
-    metadata_link: str = ""
-    title: str = "Hydrografie survey grids"
-    summary: str = (
-        "bathymetry and topography measurements of the Dutch Continental Shelf"
-    )
-    keywords: str = "bathymetry, coast"
-    keywords_vocabulary: str = "http://www.eionet.europa.eu/gemet"
-    standard_name_vocabulary: str = (
-        "http://cf-pcmdi.llnl.gov/documents/cf-standard-names"
-    )
-    history: str = f"Created on {get_current_datetime()} by {get_current_username()} on computer {get_computer_name()} with script {get_current_package_name()}"
-    cdm_data_type: str = "grid"
-    creator_name: str = "Koninklijke Marine Dienst der Hydrografie"
-    creator_url: str = "www.hydro.nl"
-    creator_email: str = "info@hydro.nl"
-    institution: str = "Koninklijke Marine Dienst der Hydrografie"
-    date_issued: str = f"{get_current_datetime()}"
-    publisher_name: str = f"{get_current_username()}"
-    publisher_url: str = "http://www.deltares.nl"
-    publisher_email: str = "info@deltares.nl"
-    processing_level: str = "final"
-    WARNING: str = "THIS DATA IS NOT TO BE USED FOR NAVIGATIONAL PURPOSES. FOR NAVIGATION CHARTS PLEASE REFER TO <http://www.defensie.nl/marine/hydrografie/nautische_producten/navigatiekaarten> & <http://www.vaarweginformatie.nl>"
-    license: str = "These data can be used freely for research purposes provided that the following source is acknowledged: Dienst der Hydrografie. disclaimer: This data is made available in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
-    projectioncoverage_x: list = None
-    projectioncoverage_y: list = None
-    date_created: str = f"{get_current_datetime()}"
-    date_modified: str = f"{get_current_datetime()}"
-    timecoverage: str = ""
-    geospatialcoverage_northsouth: list = None
-    geospatialcoverage_eastwest: list = None
-    geospatial_lon_units: str = "degrees_east"
-    geospatial_lon_min: float = 0.0
-    geospatial_lon_max: float = 0.0
-    geospatial_lat_units: str = "degrees_north"
-    geospatial_lat_min: float = 0.0
-    geospatial_lat_max: float = 0.0
-    geospatial_vertical_units: str = "m"
-    geospatial_vertical_positive: str = "up"
-    geospatial_vertical_min: float = 0
-    geospatial_vertical_max: float = 0
-    time_coverage_units: str = ""
-    source_data: str = "https://repos.deltares.nl/repos/ODyn/trunk/RawData/CorrectPointData/Mariene/, revision 47"
-    processing_software: str = "https://repos.deltares.nl/repos/ODyn/trunk/Tools/Java/Sourcecode/GridSplitBatch/, revision 47"
-    processing_method: str = (
-        "Inverse Distance Weight interpolation of LOV2 data with radius 100 m"
-    )
-    DODS_strlen: int = 100
-    DODS_dimName: str = "stringsize"
-    DODS_EXTRA_Unlimited_Dimension: str = "time"
-    EXTRA_DIMENSION_dim16: int = 16
-
-    def __setattr__(self, name, value):
-        """
-        Set date_modified to current time if any attribute is changed.
-        """
-        if hasattr(self, name) and getattr(self, name) != value:
-            super().__setattr__("date_modified", get_current_datetime())
-        super().__setattr__(name, value)
-
-    @classmethod
-    def from_dataarray(cls, dataarray):
-        """
-        Create an NLHOAttributes object from an xarray.DataArray.
-        """
-        attrs = cls()
-        attrs.geospatial_lon_min = float(dataarray.x.min())
-        attrs.geospatial_lon_max = float(dataarray.x.max())
-        attrs.geospatial_lat_min = float(dataarray.y.min())
-        attrs.geospatial_lat_max = float(dataarray.y.max())
-        attrs.geospatial_vertical_min = float(dataarray.values.min())
-        attrs.geospatial_vertical_max = float(dataarray.values.max())
-        attrs.timecoverage = (
-            f"{dataarray.time.min().values} - {dataarray.time.max().values}"
-        )
-        return attrs
-
-
-if __name__ == "__main__":
-    example = nlho_from_opendap()
-    tiles, files = get_nlho_tiles_and_files(r"p:\tgg-mariene-data\__UPDATES\GRIDS")
-    metadata = parse_survey_metadata(
-        r"p:\tgg-mariene-data\__UPDATES\SVN_CHECKOUTS\metadata_SVN\METADATA_ALL.xlsx"
-    )
-    metadata = validate_nlho_metadata(metadata, files)
-    for tile in tqdm(tiles):
-        tile_surveys_to_netcdf(
-            tile,
-            files,
-            metadata,
-            r"p:\tgg-mariene-data\__UPDATES\NetCDF",
-        )
