@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import numpy as np
 from pyproj import CRS
 
+from bathyu.projections import xy_to_ll
 from bathyu.utils import (
     get_computer_name,
     get_current_datetime,
@@ -238,12 +239,12 @@ class NlhoGlobalAttributes:
     date_created: str = f"{get_current_datetime()}"
     date_modified: str = f"{get_current_datetime()}"
     timecoverage: str = ""
-    crs = CRS("EPSG:32631")
-    vertical_datum = CRS("EPSG:9287")
-    # projectioncoverage_x: list = None
-    # projectioncoverage_y: list = None
-    # geospatialcoverage_northsouth: list = None
-    # geospatialcoverage_eastwest: list = None
+    time_coverage_units: str = "days since 1970-01-01 00:00:00"
+    vertical_datum: str = "LAT"
+    projectioncoverage_x: list = None
+    projectioncoverage_y: list = None
+    geospatialcoverage_northsouth: list = None
+    geospatialcoverage_eastwest: list = None
     geospatial_lon_units: str = "degrees_east"
     geospatial_lon_min: float = 0.0
     geospatial_lon_max: float = 0.0
@@ -254,7 +255,6 @@ class NlhoGlobalAttributes:
     geospatial_vertical_positive: str = "up"
     geospatial_vertical_min: float = 0
     geospatial_vertical_max: float = 0
-    time_coverage_units: str = ""
     source_data: str = "https://repos.deltares.nl/repos/ODyn/trunk/RawData/CorrectPointData/Mariene/, revision 47"
     processing_software: str = "https://repos.deltares.nl/repos/ODyn/trunk/Tools/Java/Sourcecode/GridSplitBatch/, revision 47"
     processing_method: str = (
@@ -282,10 +282,29 @@ class NlhoGlobalAttributes:
         Note: the dataset must have 'x', 'y', and 'time' coordinates.
         """
         attrs = cls()
-        attrs.geospatial_lon_min = float(dataset.x.min())
-        attrs.geospatial_lon_max = float(dataset.x.max())
-        attrs.geospatial_lat_min = float(dataset.y.min())
-        attrs.geospatial_lat_max = float(dataset.y.max())
+
+        dataset_crs = CRS(dataset.crs.attrs["projected_crs_name"])
+        x_min_projected = float(dataset.x.min())
+        x_max_projected = float(dataset.x.max())
+        y_min_projected = float(dataset.y.min())
+        y_max_projected = float(dataset.y.max())
+
+        attrs.geospatial_lon_min, attrs.geospatial_lat_min = xy_to_ll(
+            x_min_projected, y_min_projected, dataset_crs
+        )
+        attrs.geospatial_lon_max, attrs.geospatial_lat_max = xy_to_ll(
+            x_max_projected, y_max_projected, dataset_crs
+        )
+        attrs.projectioncoverage_x = (x_min_projected, x_max_projected)
+        attrs.projectioncoverage_y = (y_min_projected, y_max_projected)
+        attrs.geospatialcoverage_eastwest = (
+            attrs.geospatial_lon_min,
+            attrs.geospatial_lon_max,
+        )
+        attrs.geospatialcoverage_northsouth = (
+            attrs.geospatial_lat_min,
+            attrs.geospatial_lat_max,
+        )
         attrs.geospatial_vertical_min = float(dataset.z.min())
         attrs.geospatial_vertical_max = float(dataset.z.max())
         attrs.timecoverage = (

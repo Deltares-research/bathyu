@@ -67,7 +67,7 @@ def nlho_from_opendap(
 
 
 def get_nlho_tiles_and_files(
-    nlho_grids_folder: Path | str,
+    nlho_grids_folder: Path | str, bbox: list = None
 ) -> tuple[set[tuple[int, int]], list[Path]]:
     """
     Get the bounds of NLHO tiles and the list of .asc files from a folder.
@@ -76,6 +76,8 @@ def get_nlho_tiles_and_files(
     ----------
     nlho_grids_folder : Path or str
         The path to the folder containing NLHO grid files in .asc format.
+    bbox : list, optional
+        A bounding box specified as [min_x, min_y, max_x, max_y] to filter the tiles.
 
     Returns
     -------
@@ -87,15 +89,32 @@ def get_nlho_tiles_and_files(
     """
 
     files = list(Path(nlho_grids_folder).glob("*.asc"))
-    tiles = set(
-        [
-            (
-                int(re.search(r"x(\d+)", f.stem).group(1)),
-                int(re.search(r"y(\d+)", f.stem).group(1)),
-            )
-            for f in files
-        ]
-    )
+
+    if bbox:
+        tiles = set(
+            [
+                (
+                    int(re.search(r"x(\d+)", f.stem).group(1)),
+                    int(re.search(r"y(\d+)", f.stem).group(1)),
+                )
+                for f in files
+                if (int(re.search(r"x(\d+)", f.stem).group(1)) >= bbox[0])
+                & (int(re.search(r"x(\d+)", f.stem).group(1)) < bbox[2])
+                & (int(re.search(r"y(\d+)", f.stem).group(1)) >= bbox[1])
+                & (int(re.search(r"y(\d+)", f.stem).group(1)) < bbox[3])
+            ]
+        )
+    else:
+        tiles = set(
+            [
+                (
+                    int(re.search(r"x(\d+)", f.stem).group(1)),
+                    int(re.search(r"y(\d+)", f.stem).group(1)),
+                )
+                for f in files
+            ]
+        )
+
     return tiles, files
 
 
@@ -290,7 +309,7 @@ def tile_surveys_to_netcdf(
 
     # Set the CRS of the dataset to EPSG:32631 following CF conventions
     concatenated_surveys["crs"] = xr.DataArray(
-        np.array(0), attrs=CRS.from_epsg(32631).to_cf()
+        np.array(32631), attrs=CRS.from_epsg(32631).to_cf()
     )
 
     # Set other metadata and corresponding attributes
