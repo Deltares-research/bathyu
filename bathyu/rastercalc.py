@@ -1,6 +1,52 @@
+from functools import singledispatch
+
 import dask.array as da
 import numpy as np
+import xarray as xr
+from bottleneck import push
 from dask import delayed
+
+
+@singledispatch
+def most_recent(
+    array: np.ndarray | xr.DataArray, axis_or_dim
+) -> np.ndarray | xr.DataArray:
+    """
+    Get the last non-NaN value for each cell along an axis. This essentially
+    creates a mosaic of the data with the most recent measurement along the specified
+    axis being cast to the output array. This operation reduces the dimensionality
+    of the input array by one.
+
+    Parameters
+    ----------
+    array : np.ndarray or xr.DataArray
+        The input array from which to extract the most recent non-NaN values.
+    axis_or_dim : int or str
+        The axis along which to perform the operation. For xarray.DataArray, this can
+        be a dimension name.
+
+    Returns
+    -------
+    np.ndarray or xr.DataArray
+        An array with the most recent non-NaN values along the specified axis.
+    """
+    raise NotImplementedError(f"most_recent not implemented for {type(array)}")
+
+
+@most_recent.register
+def _(array: xr.DataArray, dim) -> xr.DataArray:
+    if isinstance(dim, int):
+        dim = array.dims[dim]
+    ffilled = array.ffill(dim=dim)
+    last = ffilled[-1]
+    return last
+
+
+@most_recent.register
+def _(array: np.ndarray, axis) -> np.ndarray:
+    ffilled = push(array, axis=axis)
+    last = ffilled.take(indices=-1, axis=axis)
+    return last
 
 
 def slope(array: np.ndarray) -> np.ndarray:

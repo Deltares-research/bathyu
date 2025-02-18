@@ -17,7 +17,7 @@ from bathyu.nlho.attributes import (
     YAttrs,
     ZAttrs,
 )
-from bathyu.rastercalc import cell_coverage, fill_with_index
+from bathyu.rastercalc import cell_coverage, fill_with_index, most_recent
 from bathyu.utils import set_da_attributes
 
 
@@ -200,14 +200,24 @@ def extract_isource_and_coverage(
     """
     coverage = cell_coverage(data.z.values, axis=0).astype(np.float32)
     isource = fill_with_index(data.z.values).astype(np.float32)
+    mosaic = most_recent(data.z.values, 0)
 
     data = data.assign(
         **{
+            "mosaic": (("y", "x"), mosaic),
             "isource": (("time", "y", "x"), isource),
             "coverage": (("y", "x"), coverage),
         }
     )
 
+    data["mosaic"] = data["mosaic"].assign_attrs(
+        **{
+            "standard_name": "mosaic",
+            "long_name": "Mosaic of surveys",
+            "definition": "Mosaic of surveys showing the most recent data for each cell",
+            "grid_mapping": "crs",
+        }
+    )
     isource_flags = " ".join([str(float(r + 1)) for r in range(len(survey_names))])
     isource_flag_meanings = " ".join([f.name for f in tile_files])
     data["isource"] = data["isource"].assign_attrs(
