@@ -241,7 +241,7 @@ def set_da_attributes(da, **kwargs):
     - "x" axis attribute: "X"
     - "y" axis attribute: "Y"
     """
-    da.attrs["_FillValue"] = np.nan
+    # da.attrs["_FillValue"] = np.nan
     da["x"].attrs["axis"] = "X"
     da["y"].attrs["axis"] = "Y"
     da = da.assign_attrs(kwargs)

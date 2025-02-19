@@ -199,7 +199,7 @@ def extract_isource_and_coverage(
     - The function extracts all variables that are not coordinates or attributes.
     """
     coverage = cell_coverage(data.z.values, axis=0).astype(np.float32)
-    isource = fill_with_index(data.z.values).astype(np.float32)
+    isource = fill_with_index(data.z.values)
     mosaic = most_recent(data.z.values, 0)
 
     data = data.assign(
@@ -210,19 +210,22 @@ def extract_isource_and_coverage(
         }
     )
 
-    data["mosaic"] = data["mosaic"].assign_attrs(
+    data["mosaic"] = data["mosaic"].assign_attrs(data["z"].attrs)
+    data["mosaic"].attrs.update(
         **{
-            "standard_name": "mosaic",
+            "standard_name": "altitude",
             "long_name": "Mosaic of surveys",
             "definition": "Mosaic of surveys showing the most recent data for each cell",
-            "grid_mapping": "crs",
+            "actual_range": (
+                np.float32(data.mosaic.min().item()),
+                np.float32(data.mosaic.max().item()),
+            ),
         }
     )
     isource_flags = " ".join([str(float(r + 1)) for r in range(len(survey_names))])
     isource_flag_meanings = " ".join([f.name for f in tile_files])
     data["isource"] = data["isource"].assign_attrs(
         **{
-            "standard_name": "isource",
             "long_name": "source file index",
             "definition": "zero based index of source file. The given index in a time slice corresponds to the survey that is most recent for that location and time.",
             "flag_values": isource_flags,
@@ -230,12 +233,17 @@ def extract_isource_and_coverage(
             "grid_mapping": "crs",
         }
     )
-    data["coverage"] = data["coverage"].assign_attrs(
+    data["coverage"] = data["coverage"].assign_attrs(data["z"].attrs)
+    data["coverage"].attrs.update(
         **{
-            "standard_name": "coverage",
+            "standard_name": "number_of_observations",
             "long_name": "Survey coverage",
             "definition": "Number of surveys covering each cell in the time dimension",
-            "grid_mapping": "crs",
+            "units": "1",
+            "actual_range": (
+                np.float32(data.coverage.min().item()),
+                np.float32(data.coverage.max().item()),
+            ),
         }
     )
     return data
@@ -279,7 +287,9 @@ def tile_surveys_to_netcdf(
 
     # Convert survey times to days since 1970-01-01
     survey_times = pd.to_datetime(survey_times)
-    survey_times = (survey_times - pd.Timestamp("1970-01-01")) // pd.Timedelta("1D")
+    survey_times = np.int32(
+        (survey_times - pd.Timestamp("1970-01-01")) // pd.Timedelta("1D")
+    )
 
     # Get raster data from tile files and concatenate
     tile_data = [
@@ -319,7 +329,7 @@ def tile_surveys_to_netcdf(
 
     # Set the CRS of the dataset to EPSG:32631 following CF conventions
     concatenated_surveys["crs"] = xr.DataArray(
-        np.array(32631), attrs=CRS.from_epsg(32631).to_cf()
+        np.array(32631, dtype=np.int32), attrs=CRS.from_epsg(32631).to_cf()
     )
 
     # Set other metadata and corresponding attributes
@@ -328,13 +338,13 @@ def tile_surveys_to_netcdf(
             metadata_data, survey_names, **metadata
         )
         concatenated_surveys = concatenated_surveys.assign(
-            **{metadata_object.standard_name: ("time", metadata_object.values)}
+            **{metadata_object.var_name: ("time", metadata_object.values)}
         )
-        concatenated_surveys[metadata_object.standard_name] = concatenated_surveys[
-            metadata_object.standard_name
+        concatenated_surveys[metadata_object.var_name] = concatenated_surveys[
+            metadata_object.var_name
         ].assign_attrs(metadata_object.attrs_as_dict)
         if "timeunits" in metadata_object.attrs_as_dict.keys():
-            concatenated_surveys[metadata_object.standard_name].encoding["units"] = (
+            concatenated_surveys[metadata_object.var_name].encoding["units"] = (
                 metadata_object.timeunits
             )
 

@@ -112,6 +112,8 @@ class TimeAttrs(AbstractAttributes):
     standard_name: str = "time"
     long_name: str = "Date and time at the completion of the survey"
     units: str = "days since 1970-01-01 00:00:00"
+    calendar: str = "gregorian"
+    axis: str = "T"
     definition: str = "Date and time at the completion of a survey in days since 1970-01-01. The time coordinate is used to represent the time of the survey."
     actual_range: tuple = None
 
@@ -124,7 +126,10 @@ class TimeAttrs(AbstractAttributes):
         Note: the dataset must have 'x', 'y', and 'time' coordinates.
         """
         attrs = cls()
-        attrs.actual_range = (float(dataset.time.min()), float(dataset.time.max()))
+        attrs.actual_range = (
+            np.int32(dataset.time.min()),
+            np.int32(dataset.time.max()),
+        )
         return attrs
 
     @property
@@ -153,8 +158,11 @@ class ZAttrs(AbstractAttributes):
 
         Note: the dataset must have 'x', 'y', and 'time' coordinates.
         """
+        dtype = dataset.z.dtype.type
         attrs = cls()
-        attrs.actual_range = (float(dataset.z.min()), float(dataset.z.max()))
+        attrs.actual_range = (dtype(dataset.z.min()), dtype(dataset.z.max()))
+        attrs.scale_factor = dtype(dataset.z.attrs["scale_factor"])
+        attrs.add_offset = dtype(dataset.z.attrs["add_offset"])
         return attrs
 
     @property
@@ -167,7 +175,6 @@ class MetaAttrs(AbstractMetadataAttributes):
     Dataclass for metadata attributes.
     """
 
-    standard_name: str = ""
     long_name: str = ""
     definition: str = ""
     values = None
@@ -178,14 +185,32 @@ class MetaAttrs(AbstractMetadataAttributes):
         for k, v in kwargs.items():
             obj.__setattr__(k, v)
         obj.values = metadata_df.loc[indices][obj.__dict__["long_name"]].values
-        if hasattr(obj, "units"):
-            obj.__setattr__(
-                "actual_range",
-                f"{np.nanmin(obj.values.min())} - {np.nanmax(obj.values.max())}",
+        if obj.values.dtype == "object":
+            obj.values = np.array(
+                [v.encode("utf-8") for v in obj.values.astype(np.str_)]
             )
+        if hasattr(obj, "units"):
             if np.issubdtype(obj.values.dtype, np.datetime64):
-                obj.__setattr__("timeunits", "days since 1970-01-01 00:00:00")
-                obj.__delattr__("units")
+                obj.__setattr__("units", "days since 1970-01-01 00:00:00")
+                obj.__setattr__("calendar", "gregorian")
+                obj.values = (
+                    obj.values - np.datetime64("1970-01-01")
+                ) / np.timedelta64(1, "D")
+                obj.__setattr__(
+                    "actual_range",
+                    (
+                        np.int32(obj.values.min()),
+                        np.int32(obj.values.max()),
+                    ),
+                )
+            else:
+                obj.__setattr__(
+                    "actual_range",
+                    (np.nanmin(obj.values.min()), np.nanmax(obj.values.max())),
+                )
+
+        else:
+            obj.__setattr__("units", "1")
 
         return obj
 

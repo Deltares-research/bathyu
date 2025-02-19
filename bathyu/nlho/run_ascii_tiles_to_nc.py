@@ -14,9 +14,9 @@ from bathyu.nlho.nlho import (
 METADATA_JSON = Path(__file__).parent / "metadata.json"
 
 if __name__ == "__main__":
-    example = nlho_from_opendap(
-        url="https://opendap.deltares.nl/thredds/dodsC/opendap/hydrografie/surveys/x405000y5665000.nc"
-    )
+    # example = nlho_from_opendap(
+    #     url="https://opendap.deltares.nl/thredds/dodsC/opendap/hydrografie/surveys_2025/x640000y5945000.nc"
+    # )
     tiles, files = get_nlho_tiles_and_files(
         r"p:\tgg-mariene-data\__UPDATES\GRIDS",
         # bbox=[555000, 5765000, 575000, 5790000],
