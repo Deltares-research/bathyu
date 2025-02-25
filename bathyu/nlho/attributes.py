@@ -299,7 +299,7 @@ class NlhoGlobalAttributes:
         super().__setattr__(name, value)
 
     @classmethod
-    def from_dataset(cls, dataset):
+    def from_dataset(cls, dataset, timeaxis=True):
         """
         Create an NLHOAttributes object from an xarray.Dataset. This method sets the
         geospatial global attributes based on the dataset's coordinates and values.
@@ -332,9 +332,10 @@ class NlhoGlobalAttributes:
         )
         attrs.geospatial_vertical_min = float(dataset.z.min())
         attrs.geospatial_vertical_max = float(dataset.z.max())
-        attrs.timecoverage = (
-            f"{dataset.time.min().values} - {dataset.time.max().values}"
-        )
+        if timeaxis:
+            attrs.timecoverage = (
+                f"{dataset.time.min().values} - {dataset.time.max().values}"
+            )
         return attrs
 
     @property
