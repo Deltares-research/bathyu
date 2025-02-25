@@ -359,3 +359,24 @@ def tile_surveys_to_netcdf(
     output_folder.mkdir(parents=True, exist_ok=True)
     output_file = output_folder / f"x{tile[0]}y{tile[1]}.nc"
     to_nc(concatenated_surveys, output_file, compress=True)
+
+
+def combine_nlho_mosaics(nc_files):
+    """
+    Combine NLHO mosaics from NetCDF files in a folder.
+
+    Parameters
+    ----------
+    nc_files: Path or str
+        The path to the folder containing NLHO NetCDF files.
+
+    Returns
+    -------
+    xr.Dataset
+        A dataset containing the combined mosaics from all NetCDF files in the folder.
+    """
+    datasets = [xr.open_dataset(file).mosaic for file in nc_files]
+    combined = xr.combine_by_coords(datasets, combine_attrs="override")
+    combined['x'] = combined['x'].assign_attrs(XAttrs.from_dataset(combined).as_dict)
+    combined['y'] = combined['y'].assign_attrs(YAttrs.from_dataset(combined).as_dict)
+    return combined

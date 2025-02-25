@@ -1,10 +1,21 @@
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
 import xarray as xr
 
-from bathyu.rastercalc import cell_coverage
 from bathyu.io.export import to_geotiff
+from bathyu.nlho.nlho import combine_nlho_mosaics
+from bathyu.rastercalc import cell_coverage
+
+# gdf = gpd.read_file(
+#     r"n:\Projects\11211000\11211195\B. Measurements and calculations\Detecties_rond_P18.shp"
+# )
+# gdf.to_csv(
+#     r"n:\Projects\11211000\11211195\B. Measurements and calculations\Detecties_rond_P18.csv",
+#     index=False,
+# )
+# print(1)
 
 
 def temporal_coverage(dataset, since="1990-01-01", window=365):
@@ -14,8 +25,8 @@ def temporal_coverage(dataset, since="1990-01-01", window=365):
         np.datetime64("2025-01-01") - np.datetime64("1990-01-01")
     ) / np.timedelta64(1, "D")
     temporal_coverage = (
-        (cell_coverage(data_sel.z, axis=0) * window) / total_days
-    ) * 100
+        (cell_coverage(data_sel.z, axis=0) * total_days) / total_days
+    ) - 1
     temporal_coverage_da = xr.DataArray(
         temporal_coverage,
         coords=[data_sel.y, data_sel.x],
@@ -30,9 +41,18 @@ if __name__ == "__main__":
     folder = Path(r"p:\tgg-mariene-data\__UPDATES\NetCDF_CO2")
     files = list(folder.glob("*.nc"))
 
+    combined_mosaics = combine_nlho_mosaics(files)
+
     datasets = [xr.open_dataset(file) for file in files]
     temp_cov = [temporal_coverage(dataset) for dataset in datasets]
+    norm_cov = [dataset.coverage for dataset in datasets]
 
-    combined = xr.combine_by_coords(temp_cov, combine_attrs="override")
+    combined = xr.combine_by_coords(norm_cov, combine_attrs="override")
+    temporal_combined = xr.combine_by_coords(temp_cov, combine_attrs="override")
 
-    to_geotiff(combined.temporal_coverage, folder.joinpath("temporal_coverage.tif"))
+    to_geotiff(combined_mosaics.mosaic, folder.joinpath("mosaic.tif"))
+    to_geotiff(combined.coverage, folder.joinpath("coverage.tif"))
+    to_geotiff(
+        temporal_combined.temporal_coverage,
+        folder.joinpath("temporal_coverage.tif"),
+    )
