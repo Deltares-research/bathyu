@@ -378,11 +378,27 @@ def combine_nlho_mosaics(nc_files):
     datasets = [xr.open_dataset(file)[["mosaic", "coverage"]] for file in nc_files]
     datasets = [ds.rename({"mosaic": "z"}) for ds in datasets]
     combined = xr.combine_by_coords(datasets, combine_attrs="override")
+
+    # Assign all attributes
     combined["crs"] = xr.DataArray(
         np.array(32631, dtype=np.int32), attrs=CRS.from_epsg(32631).to_cf()
     )
     combined["x"] = combined["x"].assign_attrs(XAttrs.from_dataset(combined).as_dict)
     combined["y"] = combined["y"].assign_attrs(YAttrs.from_dataset(combined).as_dict)
+    combined["z"] = combined["z"].assign_attrs(ZAttrs.from_dataset(combined).as_dict)
+    combined["coverage"] = combined["coverage"].assign_attrs(combined["z"].attrs)
+    combined["coverage"].attrs.update(
+        **{
+            "standard_name": "number_of_observations",
+            "long_name": "Survey coverage",
+            "definition": "Number of surveys covering each cell in the time dimension",
+            "units": "1",
+            "actual_range": (
+                np.float32(combined.coverage.min().item()),
+                np.float32(combined.coverage.max().item()),
+            ),
+        }
+    )
     combined = set_da_attributes(
         combined,
         **NlhoGlobalAttributes.from_dataset(combined, timeaxis=False).as_dict,

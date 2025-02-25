@@ -161,8 +161,9 @@ class ZAttrs(AbstractAttributes):
         dtype = dataset.z.dtype.type
         attrs = cls()
         attrs.actual_range = (dtype(dataset.z.min()), dtype(dataset.z.max()))
-        attrs.scale_factor = dtype(dataset.z.attrs["scale_factor"])
-        attrs.add_offset = dtype(dataset.z.attrs["add_offset"])
+        if "scale_factor" and "add_offset" in dataset.z.attrs:
+            attrs.scale_factor = dtype(dataset.z.attrs["scale_factor"])
+            attrs.add_offset = dtype(dataset.z.attrs["add_offset"])
         return attrs
 
     @property
