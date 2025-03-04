@@ -2,20 +2,12 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import rioxarray as rio
 import xarray as xr
 
 from bathyu.io.export import to_geotiff
 from bathyu.nlho.nlho import combine_nlho_mosaics
 from bathyu.rastercalc import cell_coverage
-
-# gdf = gpd.read_file(
-#     r"n:\Projects\11211000\11211195\B. Measurements and calculations\Detecties_rond_P18.shp"
-# )
-# gdf.to_csv(
-#     r"n:\Projects\11211000\11211195\B. Measurements and calculations\Detecties_rond_P18.csv",
-#     index=False,
-# )
-# print(1)
 
 
 def temporal_coverage(dataset, since="1990-01-01", window=365):
@@ -38,7 +30,7 @@ def temporal_coverage(dataset, since="1990-01-01", window=365):
 
 
 if __name__ == "__main__":
-    folder = Path(r"p:\tgg-mariene-data\__UPDATES\NetCDF_CO2")
+    folder = Path(r"p:\tgg-mariene-data\__UPDATES\NetCDF_test")
     files = list(folder.glob("*.nc"))
 
     combined_mosaics = combine_nlho_mosaics(files)
@@ -50,7 +42,7 @@ if __name__ == "__main__":
     combined = xr.combine_by_coords(norm_cov, combine_attrs="override")
     temporal_combined = xr.combine_by_coords(temp_cov, combine_attrs="override")
 
-    to_geotiff(combined_mosaics.mosaic, folder.joinpath("mosaic.tif"))
+    to_geotiff(combined_mosaics.z, folder.joinpath("mosaic.tif"))
     to_geotiff(combined.coverage, folder.joinpath("coverage.tif"))
     to_geotiff(
         temporal_combined.temporal_coverage,

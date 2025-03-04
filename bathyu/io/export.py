@@ -117,23 +117,32 @@ def _(
 
 @singledispatch
 def to_geotiff(
-    data: xr.DataArray | TiledRasters, file: str | WindowsPath, compress=False
+    data: xr.DataArray | xr.Dataset | TiledRasters,
+    file: str | WindowsPath,
+    compress=False,
+    data_var=None,
 ) -> None:
     """
     Export an xarray.DataArray with (y, x) dimensions to a compressed GeoTIFF file
-    using LZW compression. Also works with TiledRasters objects.
+    using LZW compression. Also works with an xarray.Dataset (provided which data_var
+    to export) and TiledRasters objects.
 
     Parameters
     ----------
-    data : xr.DataArray | TiledRasters
-        The DataArray to save. Must have only two dimensions 'y' and 'x'.
+    data : xr.DataArray | xr.Dataset | TiledRasters
+        The DataArray to save. Must have only two dimensions 'y' and 'x'. If data is an
+        xr.Dataset, you must specify which data variable to save.
     file : str | WindowsPath
         Path of the file to be saved.
+    compress : bool, optional
+        Whether to compress the output file, by default False.
+    data_var : str, optional
+        The name of the data variable to save if data is an xr.Dataset, by default None.
 
     Raises
     ------
     TypeError
-        If the input data is not an xarray.DataArray or TiledRasters
+        If the input data is not an xarray.DataArray, Dataset or TiledRasters object.
     """
     raise TypeError(f"Unsupported data type: {type(data)}")
 
@@ -151,6 +160,25 @@ def _(
         data.rio.to_raster(file, driver="GTiff", compress="LZW")
     else:
         data.rio.to_raster(file, driver="GTiff")
+
+
+@to_geotiff.register
+def _(
+    data: xr.Dataset,
+    file: str | WindowsPath,
+    compress=False,
+    data_var=None,
+) -> None:
+    """
+    Implementation of to_geotiff for xr.Dataset objects. Requires the data variable to
+    export to be specified.
+    """
+    if data_var is None:
+        raise ValueError(
+            "When exporting an xarray.Dataset, you must specify the data variable to export."
+        )
+    else:
+        to_geotiff(data[data_var], file, compress=compress)
 
 
 @to_geotiff.register
