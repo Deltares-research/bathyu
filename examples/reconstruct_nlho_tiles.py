@@ -1,5 +1,5 @@
 from bathyu import TiledRasters
-from bathyu.io import export, nlho_grids_io
+from bathyu.io import export, opendap
 
 nlho_grids_folder = r"p:\tgg-mariene-data\__UPDATES\GRIDS5M"
 
@@ -15,7 +15,7 @@ export.to_geotiff(
 )
 
 for survey in surveys:
-    survey_data = nlho_grids_io.reconstruct_nlho_survey(
+    survey_data = opendap.reconstruct_nlho_survey(
         nlho_grids_folder,
         survey,
         within_bbox=True,
