@@ -4004,7 +4004,7 @@ packages:
   name: bathyu
   version: 0.1.0
   path: .
-  sha256: 45002d2420e19264c9da4faa771fa7676bfc1fee1f1d5dacf9d37ed9cf934591
+  sha256: 1489e9de51c08b29686989c0d728652c5218df6630d04e7bc5e08c25469a856e
   requires_dist:
   - dask
   - geopandas
