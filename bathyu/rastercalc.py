@@ -9,7 +9,7 @@ from dask import delayed
 
 @singledispatch
 def most_recent(
-    array: np.ndarray | xr.DataArray, axis_or_dim
+    array: np.ndarray | xr.DataArray | xr.Dataset, axis_or_dim: int | str, data_var: str
 ) -> np.ndarray | xr.DataArray:
     """
     Get the last non-NaN value for each cell along an axis. This essentially
@@ -23,12 +23,16 @@ def most_recent(
         The input array from which to extract the most recent non-NaN values.
     axis_or_dim : int or str
         The axis along which to perform the operation. For xarray.DataArray, this can
-        be a dimension name.
+        also be a dimension name (e.g. "time").
+    data_var : str
+        If `array` is an xarray.Dataset, this parameter specifies the data variable
+        to use.
 
     Returns
     -------
     np.ndarray or xr.DataArray
-        An array with the most recent non-NaN values along the specified axis.
+        An array with the most recent non-NaN values along the specified axis. Returns
+        a numpy array if the input is a numpy array, otherwise returns an xarray.DataArray.
     """
     raise NotImplementedError(f"most_recent not implemented for {type(array)}")
 
@@ -39,6 +43,12 @@ def _(array: xr.DataArray, dim) -> xr.DataArray:
         dim = array.dims[dim]
     ffilled = array.ffill(dim=dim)
     last = ffilled[-1]
+    return last
+
+
+@most_recent.register
+def _(array: xr.Dataset, dim, data_var) -> xr.DataArray:
+    last = most_recent(array[data_var], dim)
     return last
 
 
